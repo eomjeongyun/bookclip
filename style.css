@@ -12,7 +12,7 @@
 }
 
 :root {
-  --paper: #fbf6ea;
+  --paper: #ffffff;
   --paper-deep: #f2e7d1;
   --ink: #453b39;
   --muted: #897c76;
@@ -37,10 +37,7 @@ body {
   min-width: 320px;
   min-height: 100vh;
   min-height: 100dvh;
-  background:
-    radial-gradient(circle at 12% 10%, rgba(201, 240, 225, .55), transparent 26%),
-    radial-gradient(circle at 88% 34%, rgba(247, 198, 215, .38), transparent 24%),
-    var(--paper);
+  background: var(--paper);
   font-family: inherit;
 }
 
@@ -81,25 +78,39 @@ main { padding: 10px 18px calc(116px + env(safe-area-inset-bottom)); }
 .book-count { margin: 0; padding: 7px 13px; background: var(--mint); border-radius: 999px; }
 
 .bookshelf { margin-top: 23px; min-height: 430px; }
-.shelf-row {
-  min-height: 178px; display: flex; align-items: flex-end; gap: 6px; padding: 10px 13px 13px;
-  border-bottom: 14px solid var(--wood); position: relative;
+.shelf-cabinet {
+  --shelf-height: 184px;
+  position: relative; display: grid; grid-template-rows: repeat(var(--shelf-count), var(--shelf-height));
+  min-height: calc((var(--shelf-count) * var(--shelf-height)) + 44px);
+  padding: 35px 33px 9px; filter: drop-shadow(0 9px 7px rgba(83, 48, 28, .16));
 }
-.shelf-row::after {
-  content: ''; position: absolute; left: 5px; right: 5px; bottom: -20px; height: 6px;
-  background: var(--wood-dark); border-radius: 0 0 6px 6px; opacity: .35;
+.shelf-illustration { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.wood-panel {
+  fill: var(--wood); stroke: var(--wood-dark); stroke-width: 4; stroke-linejoin: round;
+  vector-effect: non-scaling-stroke; filter: url(#wood-wobble);
+}
+.wood-top, .wood-bottom { fill: #b9794f; }
+.wood-board { fill: #c28a5d; }
+.wood-side { fill: #a96f49; }
+.shelf-row {
+  min-width: 0; display: flex; align-items: flex-end; gap: 5px; padding: 10px 6px 8px;
+  position: relative; z-index: 1;
 }
 .book-spine {
-  width: clamp(34px, 11vw, 52px); min-width: 34px; height: var(--book-height, 145px);
-  border: 0; border-radius: 5px 7px 2px 2px; padding: 9px 6px; cursor: pointer;
-  box-shadow: inset -4px 0 rgba(255,255,255,.2), 2px 3px 4px rgba(70,45,35,.18);
+  width: clamp(27px, 8.5vw, 48px); min-width: 0; height: var(--book-height, 145px);
+  border: 2px solid rgba(69,59,57,.58); border-radius: 7px 5px 3px 4px; padding: 9px 5px; cursor: pointer;
+  box-shadow: inset -4px 0 rgba(255,255,255,.2), 2px 3px 3px rgba(70,45,35,.2);
   display: flex; align-items: center; justify-content: flex-start; writing-mode: vertical-rl;
-  text-orientation: mixed; overflow: hidden; line-height: 1.08; font-size: .84rem;
+  text-orientation: mixed; overflow: hidden; line-height: 1.08; font-size: clamp(.7rem, 2.4vw, .84rem);
+  font-family: 'YeongdeokSea', 'Apple SD Gothic Neo', 'Malgun Gothic', cursive;
+  transform: rotate(var(--book-tilt, 0deg)); transform-origin: bottom center;
 }
-.book-spine:active { transform: translateY(2px); }
+.book-spine:nth-child(3n) { border-radius: 4px 8px 2px 5px; }
+.book-spine::after { content: ''; width: 2px; height: 15px; margin-top: 7px; border-radius: 50%; background: currentColor; opacity: .25; }
+.book-spine:active { transform: translateY(2px) rotate(var(--book-tilt, 0deg)); }
 .empty-state {
-  margin: 62px auto; width: min(100%, 340px); padding: 34px 24px; text-align: center;
-  background: rgba(255,255,255,.54); border: 2px dashed var(--mint-deep); border-radius: 22px;
+  margin: 24px auto 0; width: min(100%, 340px); padding: 18px 24px; text-align: center;
+  background: #fff; border: 2px dashed var(--mint-deep); border-radius: 22px 18px 24px 19px;
 }
 .empty-state strong { display: block; font-size: 1.25rem; margin-bottom: 8px; }
 .empty-state p { margin: 0; color: var(--muted); line-height: 1.7; }
@@ -108,7 +119,7 @@ main { padding: 10px 18px calc(116px + env(safe-area-inset-bottom)); }
   position: fixed; z-index: 20; left: 50%; bottom: 0; transform: translateX(-50%);
   width: min(100%, 720px); display: grid; grid-template-columns: 1fr 1fr;
   padding: 9px 20px calc(9px + env(safe-area-inset-bottom));
-  background: rgba(251, 246, 234, .94); border-top: 1px solid rgba(131,90,64,.15);
+  background: rgba(255,255,255,.94); border-top: 1px solid rgba(131,90,64,.15);
   backdrop-filter: blur(12px);
 }
 .nav-button { border: 0; background: transparent; padding: 7px; color: var(--muted); }

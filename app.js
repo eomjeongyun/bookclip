@@ -111,9 +111,68 @@ function hashTitle(title) {
   return Math.abs(hash);
 }
 
+function createShelfIllustration(compartmentCount) {
+  const svgNamespace = 'http://www.w3.org/2000/svg';
+  const shelfHeight = 184;
+  const cabinetHeight = (compartmentCount * shelfHeight) + 44;
+  const svg = document.createElementNS(svgNamespace, 'svg');
+  svg.classList.add('shelf-illustration');
+  svg.setAttribute('viewBox', `0 0 600 ${cabinetHeight}`);
+  svg.setAttribute('preserveAspectRatio', 'none');
+  svg.setAttribute('aria-hidden', 'true');
+
+  svg.innerHTML = `
+    <defs>
+      <filter id="wood-wobble" x="-3%" y="-3%" width="106%" height="106%">
+        <feTurbulence type="fractalNoise" baseFrequency="0.012 0.045" numOctaves="1" seed="7" result="noise"/>
+        <feDisplacementMap in="SourceGraphic" in2="noise" scale="1.5" xChannelSelector="R" yChannelSelector="G"/>
+      </filter>
+    </defs>
+    <path class="wood-panel wood-top" d="M17 25 Q145 18 299 23 T583 21 L586 45 Q434 49 300 44 T14 47 Z"/>
+    <path class="wood-panel wood-side" d="M16 24 Q9 ${cabinetHeight / 2} 17 ${cabinetHeight - 18} L42 ${cabinetHeight - 15} Q36 ${cabinetHeight / 2} 43 43 Z"/>
+    <path class="wood-panel wood-side" d="M558 42 Q565 ${cabinetHeight / 2} 558 ${cabinetHeight - 15} L584 ${cabinetHeight - 18} Q591 ${cabinetHeight / 2} 583 21 Z"/>
+  `;
+
+  for (let index = 1; index <= compartmentCount; index += 1) {
+    const y = 28 + (index * shelfHeight);
+    const shelf = document.createElementNS(svgNamespace, 'path');
+    shelf.setAttribute('class', index === compartmentCount ? 'wood-panel wood-bottom' : 'wood-panel wood-board');
+    shelf.setAttribute('d', `M25 ${y - 7} Q155 ${y - 12} 300 ${y - 7} T575 ${y - 9} L579 ${y + 12} Q430 ${y + 18} 300 ${y + 12} T21 ${y + 14} Z`);
+    svg.append(shelf);
+  }
+  return svg;
+}
+
 function renderShelf() {
   elements.bookCount.textContent = `${state.books.length}권`;
   elements.bookshelf.replaceChildren();
+  const booksPerShelf = 7;
+  const compartmentCount = Math.max(3, Math.ceil(state.books.length / booksPerShelf));
+  const cabinet = document.createElement('div');
+  cabinet.className = 'shelf-cabinet';
+  cabinet.style.setProperty('--shelf-count', compartmentCount);
+  cabinet.append(createShelfIllustration(compartmentCount));
+
+  for (let start = 0; start < compartmentCount * booksPerShelf; start += booksPerShelf) {
+    const row = document.createElement('div');
+    row.className = 'shelf-row';
+    state.books.slice(start, start + booksPerShelf).forEach((book) => {
+      const hash = hashTitle(book.title);
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'book-spine';
+      button.style.background = BOOK_COLORS[hash % BOOK_COLORS.length];
+      button.style.setProperty('--book-height', `${126 + (hash % 39)}px`);
+      button.style.setProperty('--book-tilt', `${(hash % 5) - 2}deg`);
+      button.textContent = book.title;
+      button.setAttribute('aria-label', `${book.title} 상세 보기`);
+      button.addEventListener('click', () => openDetail(book.id, 'home-view'));
+      row.append(button);
+    });
+    cabinet.append(row);
+  }
+  elements.bookshelf.append(cabinet);
+
   if (!state.books.length) {
     const empty = document.createElement('div');
     empty.className = 'empty-state';
@@ -123,25 +182,6 @@ function renderShelf() {
     copy.textContent = '읽은 책을 기록할 때마다 이곳에 책 한 권이 차곡차곡 꽂혀요.';
     empty.append(title, copy);
     elements.bookshelf.append(empty);
-    return;
-  }
-
-  for (let start = 0; start < state.books.length; start += 10) {
-    const row = document.createElement('div');
-    row.className = 'shelf-row';
-    state.books.slice(start, start + 10).forEach((book) => {
-      const hash = hashTitle(book.title);
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'book-spine';
-      button.style.background = BOOK_COLORS[hash % BOOK_COLORS.length];
-      button.style.setProperty('--book-height', `${126 + (hash % 39)}px`);
-      button.textContent = book.title;
-      button.setAttribute('aria-label', `${book.title} 상세 보기`);
-      button.addEventListener('click', () => openDetail(book.id, 'home-view'));
-      row.append(button);
-    });
-    elements.bookshelf.append(row);
   }
 }
 

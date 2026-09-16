@@ -1,4 +1,4 @@
-const CACHE_NAME = 'bookclip-v1';
+const CACHE_NAME = 'bookclip-v2';
 const APP_SHELL = [
   './',
   './index.html',
