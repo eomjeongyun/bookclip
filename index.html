@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#C9F0E1">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="BookClip">
+  <title>BookClip</title>
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+  <link rel="icon" href="./icons/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">나만의 독서 기록</p>
+        <h1>BookClip</h1>
+      </div>
+      <span class="mini-clip" aria-hidden="true"></span>
+    </header>
+
+    <main id="app" tabindex="-1">
+      <section id="home-view" class="view active" aria-labelledby="shelf-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">읽은 만큼 채워지는</p>
+            <h2 id="shelf-title">나의 책꽂이</h2>
+          </div>
+          <p id="book-count" class="book-count">0권</p>
+        </div>
+        <div id="bookshelf" class="bookshelf" aria-live="polite"></div>
+      </section>
+
+      <section id="calendar-view" class="view" aria-labelledby="calendar-title">
+        <div class="calendar-head">
+          <button id="prev-month" class="icon-button" type="button" aria-label="이전 달">‹</button>
+          <h2 id="calendar-title"></h2>
+          <button id="next-month" class="icon-button" type="button" aria-label="다음 달">›</button>
+        </div>
+        <div class="weekdays" aria-hidden="true">
+          <span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span>
+        </div>
+        <div id="calendar-grid" class="calendar-grid"></div>
+        <div id="day-books" class="day-books" aria-live="polite"></div>
+      </section>
+
+      <section id="detail-view" class="view" aria-labelledby="detail-title">
+        <button id="detail-back" class="text-button back-button" type="button">책꽂이로</button>
+        <article class="detail-card">
+          <div class="detail-title-row">
+            <div>
+              <p id="detail-date" class="eyebrow"></p>
+              <h2 id="detail-title"></h2>
+            </div>
+            <button id="edit-book" class="soft-button" type="button">수정</button>
+          </div>
+          <section class="detail-section synopsis-section">
+            <h3>줄거리</h3>
+            <p id="detail-synopsis" class="synopsis"></p>
+          </section>
+          <section class="detail-section">
+            <h3>나의 독후감</h3>
+            <p id="detail-review" class="review-copy"></p>
+            <img id="detail-drawing" class="detail-drawing" alt="책을 읽고 그린 그림">
+          </section>
+        </article>
+      </section>
+
+      <section id="editor-view" class="view" aria-labelledby="editor-title">
+        <button id="editor-back" class="text-button back-button" type="button">돌아가기</button>
+        <div class="editor-card">
+          <p class="eyebrow">한 권의 책을 꽂아볼까요</p>
+          <h2 id="editor-title">새 독후감 쓰기</h2>
+          <form id="book-form">
+            <label for="title-input">책 제목</label>
+            <input id="title-input" name="title" type="text" required maxlength="120" autocomplete="off" placeholder="책 제목을 적어주세요">
+
+            <label for="review-input">독후감</label>
+            <textarea id="review-input" name="review" rows="5" maxlength="10000" placeholder="마음에 남은 문장과 생각을 적어보세요"></textarea>
+
+            <div class="drawing-label">
+              <label for="drawing-canvas">작은 그림</label>
+              <button id="clear-drawing" class="text-button" type="button">지우기</button>
+            </div>
+            <div class="canvas-wrap">
+              <canvas id="drawing-canvas" width="720" height="720" aria-label="검은 펜으로 그림을 그리는 공간"></canvas>
+            </div>
+            <button id="save-book" class="primary-button" type="submit">저장</button>
+          </form>
+        </div>
+      </section>
+    </main>
+
+    <button id="add-book" class="fab" type="button" aria-label="새 독후감 쓰기">+</button>
+    <nav class="bottom-nav" aria-label="주요 메뉴">
+      <button class="nav-button active" type="button" data-view="home-view"><span class="nav-mark shelf-mark" aria-hidden="true"></span>책꽂이</button>
+      <button class="nav-button" type="button" data-view="calendar-view"><span class="nav-mark calendar-mark" aria-hidden="true"></span>달력</button>
+    </nav>
+  </div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="./app.js" defer></script>
+</body>
+</html>
