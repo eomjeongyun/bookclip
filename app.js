@@ -131,30 +131,27 @@ function hashTitle(title) {
 
 function shelfLayout(count) {
   const shelf = elements.bookshelf;
-  const availableHeight = Math.max(180, window.innerHeight - shelf.getBoundingClientRect().top - document.querySelector('.bottom-nav').offsetHeight - 8);
+  const rows = 3;
+  const availableHeight = Math.max(360, window.innerHeight - shelf.getBoundingClientRect().top - document.querySelector('.bottom-nav').offsetHeight - 8);
   const availableWidth = Math.max(250, shelf.clientWidth - 58);
-  let best = null;
-  const maxRows = Math.max(1, Math.min(count || 1, Math.floor(availableHeight / 74)));
-  for (let rows = 1; rows <= maxRows; rows += 1) {
-    const columns = Math.ceil(Math.max(count, 1) / rows);
-    const gap = columns > 14 ? 2 : columns > 9 ? 3 : 5;
-    const width = Math.min(48, (availableWidth - gap * (columns - 1)) / columns);
-    const rowHeight = availableHeight / rows;
-    const height = Math.min(164, rowHeight - 22);
-    const score = Math.min(width / 27, height / 88);
-    if (!best || score > best.score) best = { rows, columns, gap, width, height, rowHeight, score, availableHeight };
-  }
-  return best;
+  const columns = Math.ceil(Math.max(count, 1) / rows);
+  const gap = columns > 13 ? 2 : columns > 9 ? 3 : 5;
+  const width = Math.max(20, Math.min(46, (availableWidth - gap * (columns - 1)) / columns));
+  const rowHeight = availableHeight / rows;
+  const density = Math.min(1, Math.max(0, (columns - 7) / 9));
+  const height = Math.max(72, Math.min(rowHeight - 24, 150 - density * 27));
+  return { rows, columns, gap, width, height, rowHeight, availableHeight };
 }
 
-function createShelfIllustration(rows) {
+function createShelfIllustration() {
+  const rows = 3;
   const ns = 'http://www.w3.org/2000/svg';
   const svg = document.createElementNS(ns, 'svg');
   svg.classList.add('shelf-illustration');
   svg.setAttribute('viewBox', `0 0 600 ${rows * 184 + 44}`);
   svg.setAttribute('preserveAspectRatio', 'none');
   svg.setAttribute('aria-hidden', 'true');
-  svg.innerHTML = `<defs><filter id="wood-wobble" x="-3%" y="-3%" width="106%" height="106%"><feTurbulence type="fractalNoise" baseFrequency=".012 .045" numOctaves="1" seed="7" result="noise"/><feDisplacementMap in="SourceGraphic" in2="noise" scale="1.5"/></filter></defs><path class="wood-panel wood-top" d="M17 25 Q145 18 299 23 T583 21 L586 45 Q434 49 300 44 T14 47 Z"/><path class="wood-panel wood-side" d="M16 24 L17 ${rows * 184 + 26} L42 ${rows * 184 + 29} L43 43 Z"/><path class="wood-panel wood-side" d="M558 42 L558 ${rows * 184 + 29} L584 ${rows * 184 + 26} L583 21 Z"/>`;
+  svg.innerHTML = `<defs><filter id="wood-wobble" x="-4%" y="-4%" width="108%" height="108%"><feTurbulence type="fractalNoise" baseFrequency=".018 .065" numOctaves="2" seed="11" result="rough"/><feDisplacementMap in="SourceGraphic" in2="rough" scale="2.8" result="wobbled"/><feTurbulence type="fractalNoise" baseFrequency=".55" numOctaves="3" seed="19" result="grain"/><feColorMatrix in="grain" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 .16 0" result="softGrain"/><feBlend in="wobbled" in2="softGrain" mode="multiply"/></filter></defs><path class="wood-panel wood-top" d="M17 25 Q139 17 299 23 Q448 28 583 21 L586 45 Q438 51 300 44 Q151 39 14 47 Z"/><path class="wood-panel wood-side" d="M16 24 Q20 160 17 ${rows * 184 + 26} L42 ${rows * 184 + 29} Q38 285 43 43 Z"/><path class="wood-panel wood-side" d="M558 42 Q562 296 558 ${rows * 184 + 29} L584 ${rows * 184 + 26} Q580 174 583 21 Z"/>`;
   for (let i = 1; i <= rows; i += 1) {
     const y = 28 + i * 184;
     const board = document.createElementNS(ns, 'path');
@@ -171,8 +168,8 @@ function renderShelf() {
   const layout = shelfLayout(state.books.length);
   const cabinet = document.createElement('div');
   cabinet.className = 'shelf-cabinet';
-  cabinet.style.setProperty('--shelf-count', layout.rows);
-  cabinet.append(createShelfIllustration(layout.rows));
+  cabinet.style.setProperty('--shelf-count', 3);
+  cabinet.append(createShelfIllustration());
   for (let start = 0; start < layout.rows * layout.columns; start += layout.columns) {
     const row = document.createElement('div');
     row.className = 'shelf-row';
@@ -210,13 +207,13 @@ function sizeShelf() {
   const cabinet = elements.bookshelf.querySelector('.shelf-cabinet');
   if (!cabinet) return;
   const layout = shelfLayout(state.books.length);
-  cabinet.style.setProperty('--shelf-count', layout.rows);
+  cabinet.style.setProperty('--shelf-count', 3);
   cabinet.style.setProperty('--shelf-height', `${layout.rowHeight}px`);
   cabinet.style.setProperty('--cabinet-height', `${layout.availableHeight}px`);
-  cabinet.style.setProperty('--spine-width', `${Math.max(9, layout.width)}px`);
-  cabinet.style.setProperty('--book-height', `${Math.max(48, layout.height)}px`);
+  cabinet.style.setProperty('--spine-width', `${layout.width}px`);
+  cabinet.style.setProperty('--book-height', `${layout.height}px`);
   cabinet.style.setProperty('--shelf-gap', `${layout.gap}px`);
-  cabinet.style.setProperty('--spine-font', `${Math.max(7, Math.min(13, layout.width * .32))}px`);
+  cabinet.style.setProperty('--spine-font', `${Math.max(9, Math.min(13, layout.width * .32))}px`);
 }
 
 function entryPageText(entry) {
