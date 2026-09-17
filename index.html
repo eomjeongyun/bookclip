@@ -53,32 +53,42 @@
         <button id="detail-back" class="text-button back-button" type="button">책꽂이로</button>
         <article class="detail-card">
           <div class="detail-title-row">
+            <img id="detail-cover" class="detail-cover" alt="" hidden>
             <div>
               <p id="detail-date" class="eyebrow"></p>
               <h2 id="detail-title"></h2>
             </div>
-            <button id="edit-book" class="soft-button" type="button">수정</button>
           </div>
           <section class="detail-section synopsis-section">
             <h3>줄거리</h3>
             <p id="detail-synopsis" class="synopsis"></p>
           </section>
-          <section class="detail-section">
-            <h3>나의 독후감</h3>
-            <p id="detail-review" class="review-copy"></p>
-            <img id="detail-drawing" class="detail-drawing" alt="책을 읽고 그린 그림">
+          <section class="detail-section entries-section">
+            <h3>나의 독서 기록</h3>
+            <div id="detail-entries" class="detail-entries"></div>
+            <button id="add-entry" class="primary-button continue-button" type="button">이어서 기록하기</button>
           </section>
         </article>
       </section>
 
       <section id="editor-view" class="view" aria-labelledby="editor-title">
         <button id="editor-back" class="text-button back-button" type="button">돌아가기</button>
-        <div class="editor-card">
-          <p class="eyebrow">한 권의 책을 꽂아볼까요</p>
+        <div id="editor-card" class="editor-card">
+          <button id="inline-editor-close" class="text-button inline-editor-close" type="button" hidden>이어쓰기 닫기</button>
+          <p id="editor-eyebrow" class="eyebrow">한 권의 책을 꽂아볼까요</p>
           <h2 id="editor-title">새 독후감 쓰기</h2>
           <form id="book-form">
             <label for="title-input">책 제목</label>
             <input id="title-input" name="title" type="text" required maxlength="120" autocomplete="off" placeholder="책 제목을 적어주세요">
+
+            <fieldset class="page-range">
+              <legend>책 페이지</legend>
+              <label for="page-from">몇 페이지부터</label>
+              <input id="page-from" name="pageFrom" type="number" min="0" inputmode="numeric" placeholder="시작">
+              <span aria-hidden="true">~</span>
+              <label for="page-to">몇 페이지까지</label>
+              <input id="page-to" name="pageTo" type="number" min="0" inputmode="numeric" placeholder="끝">
+            </fieldset>
 
             <label for="review-input">독후감</label>
             <textarea id="review-input" name="review" rows="5" maxlength="10000" placeholder="마음에 남은 문장과 생각을 적어보세요"></textarea>

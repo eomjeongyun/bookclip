@@ -6,52 +6,39 @@ const STORE_NAME = 'books';
 const MIN_DATE = '2026-09-16';
 const MIN_MONTH = new Date(2026, 8, 1);
 const BOOK_COLORS = ['#C9F0E1', '#F7C6D7', '#F1D49B', '#BFD8F1', '#D9C6EA', '#F2B6A0', '#A9D9D0'];
+const SYNOPSIS_LOADING = '줄거리를 찾는 중이에요.';
+const SYNOPSIS_MISSING = '줄거리를 찾지 못했어요.';
 
 const state = {
-  books: [],
-  activeBookId: null,
-  editingId: null,
-  returnView: 'home-view',
-  calendarDate: new Date(),
-  selectedDate: ''
+  books: [], activeBookId: null, editingEntryId: null, editorMode: 'new-book',
+  returnView: 'home-view', calendarDate: new Date(), selectedDate: ''
 };
-
 if (state.calendarDate < MIN_MONTH) state.calendarDate = new Date(MIN_MONTH);
 
 const $ = (selector) => document.querySelector(selector);
 const elements = {
-  views: [...document.querySelectorAll('.view')],
-  navButtons: [...document.querySelectorAll('.nav-button')],
-  bookshelf: $('#bookshelf'),
-  bookCount: $('#book-count'),
-  addBook: $('#add-book'),
-  form: $('#book-form'),
-  titleInput: $('#title-input'),
-  reviewInput: $('#review-input'),
-  canvas: $('#drawing-canvas'),
-  clearDrawing: $('#clear-drawing'),
-  editorTitle: $('#editor-title'),
-  saveBook: $('#save-book'),
-  editorBack: $('#editor-back'),
-  detailBack: $('#detail-back'),
-  detailTitle: $('#detail-title'),
-  detailDate: $('#detail-date'),
-  detailSynopsis: $('#detail-synopsis'),
-  detailReview: $('#detail-review'),
-  detailDrawing: $('#detail-drawing'),
-  editBook: $('#edit-book'),
-  calendarTitle: $('#calendar-title'),
-  calendarGrid: $('#calendar-grid'),
-  prevMonth: $('#prev-month'),
-  nextMonth: $('#next-month'),
-  dayBooks: $('#day-books'),
-  toast: $('#toast')
+  views: [...document.querySelectorAll('.view')], navButtons: [...document.querySelectorAll('.nav-button')],
+  bookshelf: $('#bookshelf'), bookCount: $('#book-count'), addBook: $('#add-book'), form: $('#book-form'),
+  titleInput: $('#title-input'), pageFrom: $('#page-from'), pageTo: $('#page-to'), reviewInput: $('#review-input'),
+  canvas: $('#drawing-canvas'), clearDrawing: $('#clear-drawing'), editorTitle: $('#editor-title'),
+  editorEyebrow: $('#editor-eyebrow'), editorCard: $('#editor-card'), editorView: $('#editor-view'),
+  inlineEditorClose: $('#inline-editor-close'),
+  saveBook: $('#save-book'), editorBack: $('#editor-back'),
+  detailBack: $('#detail-back'), detailTitle: $('#detail-title'), detailDate: $('#detail-date'),
+  detailSynopsis: $('#detail-synopsis'), detailCover: $('#detail-cover'), detailEntries: $('#detail-entries'),
+  addEntry: $('#add-entry'), calendarTitle: $('#calendar-title'), calendarGrid: $('#calendar-grid'),
+  prevMonth: $('#prev-month'), nextMonth: $('#next-month'), dayBooks: $('#day-books'), toast: $('#toast')
 };
 
 let dbPromise;
 let isDrawing = false;
 let canvasHasInk = false;
 let toastTimer;
+let resizeFrame;
+
+function makeId() {
+  return crypto.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
 
 function openDB() {
   if (dbPromise) return dbPromise;
@@ -89,8 +76,37 @@ async function putBook(book) {
   });
 }
 
+async function migrateBooks() {
+  const books = await getAllBooks();
+  const legacy = books.filter((book) => !Array.isArray(book.entries));
+  if (!legacy.length) return books;
+  const db = await openDB();
+  await new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_NAME, 'readwrite');
+    const store = transaction.objectStore(STORE_NAME);
+    legacy.forEach((oldBook) => {
+      const book = { ...oldBook };
+      book.entries = [{
+        id: makeId(), pageFrom: null, pageTo: null, review: book.review || '',
+        drawing: book.drawing || '', date: book.date || localDateString(),
+        createdAt: book.createdAt || new Date().toISOString()
+      }];
+      delete book.review;
+      delete book.drawing;
+      delete book.date;
+      if (!Object.prototype.hasOwnProperty.call(book, 'coverUrl')) book.coverUrl = '';
+      store.put(book);
+    });
+    transaction.oncomplete = resolve;
+    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = () => reject(transaction.error);
+  });
+  return getAllBooks();
+}
+
 async function refreshBooks() {
-  state.books = (await getAllBooks()).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  state.books = (await getAllBooks()).map((book) => ({ ...book, entries: Array.isArray(book.entries) ? book.entries : [] }))
+    .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
   renderShelf();
   renderCalendar();
 }
@@ -98,11 +114,13 @@ async function refreshBooks() {
 function showView(viewId) {
   elements.views.forEach((view) => view.classList.toggle('active', view.id === viewId));
   elements.navButtons.forEach((button) => button.classList.toggle('active', button.dataset.view === viewId));
-  const isMainView = viewId === 'home-view' || viewId === 'calendar-view';
-  elements.addBook.hidden = !isMainView;
-  document.querySelector('.bottom-nav').hidden = !isMainView;
+  const main = viewId === 'home-view' || viewId === 'calendar-view';
+  elements.addBook.hidden = !main;
+  document.querySelector('.bottom-nav').hidden = !main;
+  document.body.classList.toggle('home-active', viewId === 'home-view');
   $('#app').focus({ preventScroll: true });
   window.scrollTo({ top: 0, behavior: 'smooth' });
+  if (viewId === 'home-view') requestAnimationFrame(sizeShelf);
 }
 
 function hashTitle(title) {
@@ -111,34 +129,38 @@ function hashTitle(title) {
   return Math.abs(hash);
 }
 
-function createShelfIllustration(compartmentCount) {
-  const svgNamespace = 'http://www.w3.org/2000/svg';
-  const shelfHeight = 184;
-  const cabinetHeight = (compartmentCount * shelfHeight) + 44;
-  const svg = document.createElementNS(svgNamespace, 'svg');
+function shelfLayout(count) {
+  const shelf = elements.bookshelf;
+  const availableHeight = Math.max(180, window.innerHeight - shelf.getBoundingClientRect().top - document.querySelector('.bottom-nav').offsetHeight - 8);
+  const availableWidth = Math.max(250, shelf.clientWidth - 58);
+  let best = null;
+  const maxRows = Math.max(1, Math.min(count || 1, Math.floor(availableHeight / 74)));
+  for (let rows = 1; rows <= maxRows; rows += 1) {
+    const columns = Math.ceil(Math.max(count, 1) / rows);
+    const gap = columns > 14 ? 2 : columns > 9 ? 3 : 5;
+    const width = Math.min(48, (availableWidth - gap * (columns - 1)) / columns);
+    const rowHeight = availableHeight / rows;
+    const height = Math.min(164, rowHeight - 22);
+    const score = Math.min(width / 27, height / 88);
+    if (!best || score > best.score) best = { rows, columns, gap, width, height, rowHeight, score, availableHeight };
+  }
+  return best;
+}
+
+function createShelfIllustration(rows) {
+  const ns = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(ns, 'svg');
   svg.classList.add('shelf-illustration');
-  svg.setAttribute('viewBox', `0 0 600 ${cabinetHeight}`);
+  svg.setAttribute('viewBox', `0 0 600 ${rows * 184 + 44}`);
   svg.setAttribute('preserveAspectRatio', 'none');
   svg.setAttribute('aria-hidden', 'true');
-
-  svg.innerHTML = `
-    <defs>
-      <filter id="wood-wobble" x="-3%" y="-3%" width="106%" height="106%">
-        <feTurbulence type="fractalNoise" baseFrequency="0.012 0.045" numOctaves="1" seed="7" result="noise"/>
-        <feDisplacementMap in="SourceGraphic" in2="noise" scale="1.5" xChannelSelector="R" yChannelSelector="G"/>
-      </filter>
-    </defs>
-    <path class="wood-panel wood-top" d="M17 25 Q145 18 299 23 T583 21 L586 45 Q434 49 300 44 T14 47 Z"/>
-    <path class="wood-panel wood-side" d="M16 24 Q9 ${cabinetHeight / 2} 17 ${cabinetHeight - 18} L42 ${cabinetHeight - 15} Q36 ${cabinetHeight / 2} 43 43 Z"/>
-    <path class="wood-panel wood-side" d="M558 42 Q565 ${cabinetHeight / 2} 558 ${cabinetHeight - 15} L584 ${cabinetHeight - 18} Q591 ${cabinetHeight / 2} 583 21 Z"/>
-  `;
-
-  for (let index = 1; index <= compartmentCount; index += 1) {
-    const y = 28 + (index * shelfHeight);
-    const shelf = document.createElementNS(svgNamespace, 'path');
-    shelf.setAttribute('class', index === compartmentCount ? 'wood-panel wood-bottom' : 'wood-panel wood-board');
-    shelf.setAttribute('d', `M25 ${y - 7} Q155 ${y - 12} 300 ${y - 7} T575 ${y - 9} L579 ${y + 12} Q430 ${y + 18} 300 ${y + 12} T21 ${y + 14} Z`);
-    svg.append(shelf);
+  svg.innerHTML = `<defs><filter id="wood-wobble" x="-3%" y="-3%" width="106%" height="106%"><feTurbulence type="fractalNoise" baseFrequency=".012 .045" numOctaves="1" seed="7" result="noise"/><feDisplacementMap in="SourceGraphic" in2="noise" scale="1.5"/></filter></defs><path class="wood-panel wood-top" d="M17 25 Q145 18 299 23 T583 21 L586 45 Q434 49 300 44 T14 47 Z"/><path class="wood-panel wood-side" d="M16 24 L17 ${rows * 184 + 26} L42 ${rows * 184 + 29} L43 43 Z"/><path class="wood-panel wood-side" d="M558 42 L558 ${rows * 184 + 29} L584 ${rows * 184 + 26} L583 21 Z"/>`;
+  for (let i = 1; i <= rows; i += 1) {
+    const y = 28 + i * 184;
+    const board = document.createElementNS(ns, 'path');
+    board.setAttribute('class', i === rows ? 'wood-panel wood-bottom' : 'wood-panel wood-board');
+    board.setAttribute('d', `M25 ${y - 7} Q155 ${y - 12} 300 ${y - 7} T575 ${y - 9} L579 ${y + 12} Q430 ${y + 18} 300 ${y + 12} T21 ${y + 14} Z`);
+    svg.append(board);
   }
   return svg;
 }
@@ -146,25 +168,28 @@ function createShelfIllustration(compartmentCount) {
 function renderShelf() {
   elements.bookCount.textContent = `${state.books.length}권`;
   elements.bookshelf.replaceChildren();
-  const booksPerShelf = 7;
-  const compartmentCount = Math.max(3, Math.ceil(state.books.length / booksPerShelf));
+  const layout = shelfLayout(state.books.length);
   const cabinet = document.createElement('div');
   cabinet.className = 'shelf-cabinet';
-  cabinet.style.setProperty('--shelf-count', compartmentCount);
-  cabinet.append(createShelfIllustration(compartmentCount));
-
-  for (let start = 0; start < compartmentCount * booksPerShelf; start += booksPerShelf) {
+  cabinet.style.setProperty('--shelf-count', layout.rows);
+  cabinet.append(createShelfIllustration(layout.rows));
+  for (let start = 0; start < layout.rows * layout.columns; start += layout.columns) {
     const row = document.createElement('div');
     row.className = 'shelf-row';
-    state.books.slice(start, start + booksPerShelf).forEach((book) => {
+    state.books.slice(start, start + layout.columns).forEach((book) => {
       const hash = hashTitle(book.title);
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'book-spine';
-      button.style.background = BOOK_COLORS[hash % BOOK_COLORS.length];
-      button.style.setProperty('--book-height', `${126 + (hash % 39)}px`);
+      button.style.setProperty('--spine-color', BOOK_COLORS[hash % BOOK_COLORS.length]);
       button.style.setProperty('--book-tilt', `${(hash % 5) - 2}deg`);
-      button.textContent = book.title;
+      if (book.coverUrl) {
+        button.classList.add('has-cover');
+        button.style.backgroundImage = `linear-gradient(rgba(20,15,12,.18), rgba(20,15,12,.62)), url("${book.coverUrl.replace(/["\\]/g, '')}")`;
+      }
+      const label = document.createElement('span');
+      label.textContent = book.title;
+      button.append(label);
       button.setAttribute('aria-label', `${book.title} 상세 보기`);
       button.addEventListener('click', () => openDetail(book.id, 'home-view'));
       row.append(button);
@@ -172,228 +197,232 @@ function renderShelf() {
     cabinet.append(row);
   }
   elements.bookshelf.append(cabinet);
-
   if (!state.books.length) {
     const empty = document.createElement('div');
     empty.className = 'empty-state';
-    const title = document.createElement('strong');
-    title.textContent = '첫 독후감을 적어보세요';
-    const copy = document.createElement('p');
-    copy.textContent = '읽은 책을 기록할 때마다 이곳에 책 한 권이 차곡차곡 꽂혀요.';
-    empty.append(title, copy);
+    empty.innerHTML = '<strong>첫 독후감을 적어보세요</strong><p>읽은 책을 기록할 때마다 책꽂이 한 권이 차곡차곡 꽂혀요.</p>';
     elements.bookshelf.append(empty);
   }
+  sizeShelf();
 }
 
-function openDetail(id, fromView = 'home-view') {
+function sizeShelf() {
+  const cabinet = elements.bookshelf.querySelector('.shelf-cabinet');
+  if (!cabinet) return;
+  const layout = shelfLayout(state.books.length);
+  cabinet.style.setProperty('--shelf-count', layout.rows);
+  cabinet.style.setProperty('--shelf-height', `${layout.rowHeight}px`);
+  cabinet.style.setProperty('--cabinet-height', `${layout.availableHeight}px`);
+  cabinet.style.setProperty('--spine-width', `${Math.max(9, layout.width)}px`);
+  cabinet.style.setProperty('--book-height', `${Math.max(48, layout.height)}px`);
+  cabinet.style.setProperty('--shelf-gap', `${layout.gap}px`);
+  cabinet.style.setProperty('--spine-font', `${Math.max(7, Math.min(13, layout.width * .32))}px`);
+}
+
+function entryPageText(entry) {
+  const from = entry.pageFrom;
+  const to = entry.pageTo;
+  if (from != null && to != null) return `${from}쪽부터 ${to}쪽까지`;
+  if (from != null) return `${from}쪽부터`;
+  if (to != null) return `${to}쪽까지`;
+  return '';
+}
+
+function openDetail(id, fromView = state.returnView) {
+  restoreEditorCard();
   const book = state.books.find((item) => item.id === id);
   if (!book) return;
   state.activeBookId = id;
   state.returnView = fromView;
   elements.detailTitle.textContent = book.title;
-  elements.detailDate.textContent = formatDate(book.date);
-  elements.detailSynopsis.textContent = book.synopsis || '줄거리를 찾는 중이에요.';
-  elements.detailReview.textContent = book.review || '';
-  if (book.drawing) {
-    elements.detailDrawing.src = book.drawing;
-    elements.detailDrawing.hidden = false;
+  elements.detailDate.textContent = `${book.entries.length}개의 독서 기록`;
+  elements.detailSynopsis.textContent = book.synopsis || SYNOPSIS_MISSING;
+  if (book.coverUrl) {
+    elements.detailCover.src = book.coverUrl;
+    elements.detailCover.alt = `${book.title} 표지`;
+    elements.detailCover.hidden = false;
   } else {
-    elements.detailDrawing.removeAttribute('src');
-    elements.detailDrawing.hidden = true;
+    elements.detailCover.removeAttribute('src');
+    elements.detailCover.hidden = true;
   }
+  renderEntries(book);
   showView('detail-view');
 }
 
+function restoreEditorCard() {
+  if (elements.editorCard.parentElement !== elements.editorView) elements.editorView.append(elements.editorCard);
+  elements.addEntry.hidden = false;
+  elements.inlineEditorClose.hidden = true;
+}
+
+function renderEntries(book) {
+  elements.detailEntries.replaceChildren();
+  book.entries.forEach((entry, index) => {
+    const article = document.createElement('article');
+    article.className = 'entry-card';
+    article.tabIndex = 0;
+    const head = document.createElement('div');
+    head.className = 'entry-head';
+    const meta = document.createElement('div');
+    const date = document.createElement('strong');
+    date.textContent = formatDate(entry.date);
+    const pages = document.createElement('span');
+    pages.textContent = entryPageText(entry);
+    meta.append(date, pages);
+    const actions = document.createElement('div');
+    actions.className = 'entry-actions';
+    const edit = document.createElement('button');
+    edit.type = 'button'; edit.className = 'text-button'; edit.textContent = '수정';
+    edit.addEventListener('click', () => openEntryEditor(book, entry));
+    const remove = document.createElement('button');
+    remove.type = 'button'; remove.className = 'text-button delete-entry'; remove.textContent = '삭제';
+    remove.addEventListener('click', () => requestEntryDelete(book.id, entry.id, remove));
+    actions.append(edit, remove); head.append(meta, actions); article.append(head);
+    if (entry.review) { const review = document.createElement('p'); review.className = 'review-copy'; review.textContent = entry.review; article.append(review); }
+    if (entry.drawing) { const image = document.createElement('img'); image.className = 'detail-drawing'; image.src = entry.drawing; image.alt = `${index + 1}번째 기록의 그림`; article.append(image); }
+    article.addEventListener('dblclick', () => openEntryEditor(book, entry));
+    elements.detailEntries.append(article);
+  });
+}
+
+async function requestEntryDelete(bookId, entryId, button) {
+  if (button.dataset.armed !== 'true') {
+    button.dataset.armed = 'true';
+    button.textContent = '한 번 더 눌러 삭제';
+    setTimeout(() => { if (button.isConnected) { button.dataset.armed = ''; button.textContent = '삭제'; } }, 3000);
+    return;
+  }
+  const book = state.books.find((item) => item.id === bookId);
+  if (!book) return;
+  book.entries = book.entries.filter((entry) => entry.id !== entryId);
+  book.updatedAt = new Date().toISOString();
+  await putBook(book); await refreshBooks(); openDetail(bookId, state.returnView); showToast('기록을 삭제했어요.');
+}
+
 function formatDate(dateString) {
+  if (!dateString) return '';
   const [year, month, day] = dateString.split('-').map(Number);
   return `${year}년 ${month}월 ${day}일`;
 }
 
 function localDateString(date = new Date()) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
 function resetCanvas() {
   const context = elements.canvas.getContext('2d');
   context.clearRect(0, 0, elements.canvas.width, elements.canvas.height);
-  context.fillStyle = '#ffffff';
-  context.fillRect(0, 0, elements.canvas.width, elements.canvas.height);
-  canvasHasInk = false;
+  context.fillStyle = '#fff'; context.fillRect(0, 0, elements.canvas.width, elements.canvas.height); canvasHasInk = false;
 }
 
 function loadDrawing(dataUrl) {
   resetCanvas();
   if (!dataUrl) return;
   const image = new Image();
-  image.onload = () => {
-    elements.canvas.getContext('2d').drawImage(image, 0, 0, elements.canvas.width, elements.canvas.height);
-    canvasHasInk = true;
-  };
+  image.onload = () => { elements.canvas.getContext('2d').drawImage(image, 0, 0, elements.canvas.width, elements.canvas.height); canvasHasInk = true; };
   image.src = dataUrl;
 }
 
-function openEditor(book = null) {
-  state.editingId = book?.id || null;
-  elements.editorTitle.textContent = book ? '독후감 고치기' : '새 독후감 쓰기';
+function setEditor(book, entry, mode) {
+  restoreEditorCard();
+  state.editorMode = mode;
+  state.activeBookId = book?.id || null;
+  state.editingEntryId = entry?.id || null;
+  const isNewBook = mode === 'new-book';
+  elements.editorTitle.textContent = isNewBook ? '새 독서 기록 쓰기' : mode === 'new-entry' ? '이어서 기록하기' : '독서 기록 고치기';
+  elements.editorEyebrow.textContent = isNewBook ? '한 권의 책을 꽂아볼까요' : book.title;
   elements.titleInput.value = book?.title || '';
-  elements.reviewInput.value = book?.review || '';
-  autoGrowTextarea();
-  loadDrawing(book?.drawing || '');
-  showView('editor-view');
-  setTimeout(() => elements.titleInput.focus(), 80);
+  elements.titleInput.readOnly = !isNewBook;
+  elements.titleInput.closest('label');
+  elements.pageFrom.value = entry?.pageFrom ?? '';
+  elements.pageTo.value = entry?.pageTo ?? '';
+  elements.reviewInput.value = entry?.review || '';
+  autoGrowTextarea(); loadDrawing(entry?.drawing || '');
+  if (mode === 'new-entry') {
+    showView('detail-view');
+    elements.addEntry.hidden = true;
+    elements.addEntry.after(elements.editorCard);
+    elements.inlineEditorClose.hidden = false;
+  } else showView('editor-view');
+  setTimeout(() => (isNewBook ? elements.titleInput : elements.pageFrom).focus(), 80);
 }
 
-function autoGrowTextarea() {
-  elements.reviewInput.style.height = 'auto';
-  elements.reviewInput.style.height = `${Math.max(140, elements.reviewInput.scrollHeight)}px`;
-}
+function openNewBookEditor() { setEditor(null, null, 'new-book'); }
+function openNewEntryEditor() { const book = state.books.find((item) => item.id === state.activeBookId); if (book) setEditor(book, null, 'new-entry'); }
+function openEntryEditor(book, entry) { setEditor(book, entry, 'edit-entry'); }
 
-function getCanvasPoint(event) {
-  const rect = elements.canvas.getBoundingClientRect();
-  return {
-    x: (event.clientX - rect.left) * (elements.canvas.width / rect.width),
-    y: (event.clientY - rect.top) * (elements.canvas.height / rect.height)
-  };
-}
+function autoGrowTextarea() { elements.reviewInput.style.height = 'auto'; elements.reviewInput.style.height = `${Math.max(140, elements.reviewInput.scrollHeight)}px`; }
+function getCanvasPoint(event) { const rect = elements.canvas.getBoundingClientRect(); return { x: (event.clientX - rect.left) * elements.canvas.width / rect.width, y: (event.clientY - rect.top) * elements.canvas.height / rect.height }; }
+function startDrawing(event) { event.preventDefault(); isDrawing = true; canvasHasInk = true; elements.canvas.setPointerCapture(event.pointerId); const p = getCanvasPoint(event); const c = elements.canvas.getContext('2d'); c.beginPath(); c.moveTo(p.x, p.y); }
+function draw(event) { if (!isDrawing) return; event.preventDefault(); const p = getCanvasPoint(event); const c = elements.canvas.getContext('2d'); c.lineTo(p.x, p.y); c.strokeStyle = '#181513'; c.lineWidth = 7; c.lineCap = 'round'; c.lineJoin = 'round'; c.stroke(); }
+function stopDrawing(event) { if (!isDrawing) return; isDrawing = false; if (elements.canvas.hasPointerCapture(event.pointerId)) elements.canvas.releasePointerCapture(event.pointerId); }
 
-function startDrawing(event) {
-  event.preventDefault();
-  isDrawing = true;
-  canvasHasInk = true;
-  elements.canvas.setPointerCapture(event.pointerId);
-  const point = getCanvasPoint(event);
-  const context = elements.canvas.getContext('2d');
-  context.beginPath();
-  context.moveTo(point.x, point.y);
-}
+function stripHtml(html) { return (new DOMParser().parseFromString(html, 'text/html').body.textContent || '').replace(/\s+/g, ' ').trim(); }
+function secureCover(url) { return url ? url.replace(/^http:/i, 'https:') : ''; }
 
-function draw(event) {
-  if (!isDrawing) return;
-  event.preventDefault();
-  const point = getCanvasPoint(event);
-  const context = elements.canvas.getContext('2d');
-  context.lineTo(point.x, point.y);
-  context.strokeStyle = '#181513';
-  context.lineWidth = 7;
-  context.lineCap = 'round';
-  context.lineJoin = 'round';
-  context.stroke();
-}
-
-function stopDrawing(event) {
-  if (!isDrawing) return;
-  isDrawing = false;
-  if (elements.canvas.hasPointerCapture(event.pointerId)) elements.canvas.releasePointerCapture(event.pointerId);
-}
-
-function stripHtml(html) {
-  const documentFragment = new DOMParser().parseFromString(html, 'text/html');
-  return (documentFragment.body.textContent || '').replace(/\s+/g, ' ').trim();
-}
-
-async function fetchSynopsis(title) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 8000);
+async function fetchBookMetadata(title) {
+  const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), 8000);
   try {
-    const query = encodeURIComponent(`intitle:${title}`);
-    const response = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${query}&maxResults=1&country=KR`, { signal: controller.signal });
-    if (!response.ok) throw new Error('Synopsis lookup failed');
-    const data = await response.json();
-    const description = data.items?.[0]?.volumeInfo?.description;
-    return description ? stripHtml(description) : '줄거리를 찾지 못했어요.';
-  } catch (_) {
-    return '줄거리를 찾지 못했어요.';
-  } finally {
-    clearTimeout(timer);
-  }
+    const response = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(`intitle:${title}`)}&maxResults=1&country=KR`, { signal: controller.signal });
+    if (!response.ok) throw new Error('lookup failed');
+    const info = (await response.json()).items?.[0]?.volumeInfo || {};
+    return { synopsis: info.description ? stripHtml(info.description) : SYNOPSIS_MISSING, coverUrl: secureCover(info.imageLinks?.thumbnail || info.imageLinks?.smallThumbnail || '') };
+  } catch (_) { return { synopsis: SYNOPSIS_MISSING, coverUrl: '' }; } finally { clearTimeout(timer); }
 }
 
-async function updateSynopsis(id, title) {
-  const synopsis = await fetchSynopsis(title);
+async function updateBookMetadata(id, title) {
+  const metadata = await fetchBookMetadata(title);
   const current = (await getAllBooks()).find((book) => book.id === id);
   if (!current || current.title !== title) return;
-  current.synopsis = synopsis;
-  current.updatedAt = new Date().toISOString();
-  await putBook(current);
-  await refreshBooks();
-  if (state.activeBookId === id && $('#detail-view').classList.contains('active')) {
-    elements.detailSynopsis.textContent = synopsis;
-  }
+  current.synopsis = metadata.synopsis; current.coverUrl = metadata.coverUrl; current.updatedAt = new Date().toISOString();
+  await putBook(current); await refreshBooks();
+  if (state.activeBookId === id && $('#detail-view').classList.contains('active')) openDetail(id, state.returnView);
 }
+
+function numberOrNull(input) { return input.value === '' ? null : Number(input.value); }
 
 async function saveBook(event) {
   event.preventDefault();
   const title = elements.titleInput.value.trim();
-  if (!title) {
-    elements.titleInput.focus();
-    showToast('책 제목을 적어주세요.');
-    return;
-  }
+  if (!title) { elements.titleInput.focus(); showToast('책 제목을 적어주세요.'); return; }
+  const from = numberOrNull(elements.pageFrom); const to = numberOrNull(elements.pageTo);
+  if (from != null && to != null && from > to) { elements.pageTo.focus(); showToast('끝 페이지는 시작 페이지보다 커야 해요.'); return; }
   elements.saveBook.disabled = true;
   try {
     const now = new Date().toISOString();
-    const existing = state.editingId ? state.books.find((book) => book.id === state.editingId) : null;
-    const titleChanged = Boolean(existing && existing.title !== title);
-    const book = {
-      id: existing?.id || (crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`),
-      title,
-      review: elements.reviewInput.value.trim(),
-      drawing: canvasHasInk ? elements.canvas.toDataURL('image/png') : '',
-      synopsis: existing && !titleChanged ? (existing.synopsis || '줄거리를 찾는 중이에요.') : '줄거리를 찾는 중이에요.',
-      date: existing?.date || localDateString(),
-      createdAt: existing?.createdAt || now,
-      updatedAt: now
-    };
-    await putBook(book);
-    await refreshBooks();
-    showView('home-view');
-    showToast(existing ? '독후감을 고쳤어요.' : '책꽂이에 새 책을 꽂았어요.');
-    if (!existing || titleChanged || !existing.synopsis || existing.synopsis === '줄거리를 찾는 중이에요.') {
-      updateSynopsis(book.id, book.title).catch(() => {});
+    const entry = { id: state.editingEntryId || makeId(), pageFrom: from, pageTo: to, review: elements.reviewInput.value.trim(), drawing: canvasHasInk ? elements.canvas.toDataURL('image/png') : '', date: localDateString(), createdAt: now };
+    let book;
+    if (state.editorMode === 'new-book') {
+      book = { id: makeId(), title, synopsis: SYNOPSIS_LOADING, coverUrl: '', createdAt: now, updatedAt: now, entries: [entry] };
+    } else {
+      book = state.books.find((item) => item.id === state.activeBookId);
+      if (!book) throw new Error('Book missing');
+      if (state.editorMode === 'edit-entry') {
+        const old = book.entries.find((item) => item.id === state.editingEntryId);
+        entry.date = old?.date || localDateString(); entry.createdAt = old?.createdAt || now;
+        book.entries = book.entries.map((item) => item.id === entry.id ? entry : item);
+      } else book.entries = [...book.entries, entry];
+      book.updatedAt = now;
     }
-  } catch (error) {
-    console.error('독후감을 저장하지 못했습니다.', error);
-    showToast('저장하지 못했어요. 잠시 후 다시 해주세요.');
-  } finally {
-    elements.saveBook.disabled = false;
-  }
+    await putBook(book); await refreshBooks();
+    if (state.editorMode === 'new-book') { showView('home-view'); showToast('책꽂이에 새 책을 꽂았어요.'); updateBookMetadata(book.id, book.title).catch(() => {}); }
+    else { openDetail(book.id, state.returnView); showToast(state.editorMode === 'new-entry' ? '새 기록을 이어 붙였어요.' : '기록을 고쳤어요.'); }
+  } catch (error) { console.error('독서 기록을 저장하지 못했습니다.', error); showToast('저장하지 못했어요. 잠시 뒤 다시 해주세요.'); }
+  finally { elements.saveBook.disabled = false; }
 }
 
+function allEntryDates() { return new Set(state.books.flatMap((book) => book.entries.map((entry) => entry.date))); }
 function renderCalendar() {
-  const year = state.calendarDate.getFullYear();
-  const month = state.calendarDate.getMonth();
-  elements.calendarTitle.textContent = `${year}년 ${month + 1}월`;
-  elements.prevMonth.disabled = year === 2026 && month === 8;
-  elements.calendarGrid.replaceChildren();
-  const firstWeekday = new Date(year, month, 1).getDay();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const datesWithBooks = new Set(state.books.map((book) => book.date));
-
+  const year = state.calendarDate.getFullYear(), month = state.calendarDate.getMonth();
+  elements.calendarTitle.textContent = `${year}년 ${month + 1}월`; elements.prevMonth.disabled = year === 2026 && month === 8; elements.calendarGrid.replaceChildren();
+  const first = new Date(year, month, 1).getDay(), count = new Date(year, month + 1, 0).getDate(), marked = allEntryDates();
   for (let index = 0; index < 42; index += 1) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'calendar-day';
-    const day = index - firstWeekday + 1;
-    if (day < 1 || day > daysInMonth) {
-      button.classList.add('other');
-      button.tabIndex = -1;
-    } else {
-      const date = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-      const span = document.createElement('span');
-      span.textContent = day;
-      button.append(span);
-      button.setAttribute('aria-label', formatDate(date));
-      if (date < MIN_DATE) {
-        button.classList.add('disabled');
-        button.disabled = true;
-      } else if (datesWithBooks.has(date)) {
-        button.classList.add('marked');
-        button.setAttribute('aria-label', `${formatDate(date)}, 독후감 있음`);
-        button.addEventListener('click', () => selectCalendarDay(date));
-      }
+    const button = document.createElement('button'); button.type = 'button'; button.className = 'calendar-day'; const day = index - first + 1;
+    if (day < 1 || day > count) { button.classList.add('other'); button.tabIndex = -1; }
+    else {
+      const date = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`; const span = document.createElement('span'); span.textContent = day; button.append(span); button.setAttribute('aria-label', formatDate(date));
+      if (date < MIN_DATE) { button.classList.add('disabled'); button.disabled = true; }
+      else if (marked.has(date)) { button.classList.add('marked'); button.setAttribute('aria-label', `${formatDate(date)}, 독서 기록 있음`); button.addEventListener('click', () => { state.selectedDate = date; renderCalendar(); }); }
       if (state.selectedDate === date) button.classList.add('selected');
     }
     elements.calendarGrid.append(button);
@@ -401,95 +430,46 @@ function renderCalendar() {
   renderSelectedDay();
 }
 
-function selectCalendarDay(date) {
-  state.selectedDate = date;
-  renderCalendar();
-}
-
 function renderSelectedDay() {
-  elements.dayBooks.replaceChildren();
-  if (!state.selectedDate) return;
-  const books = state.books.filter((book) => book.date === state.selectedDate);
-  if (!books.length) return;
-  const heading = document.createElement('h3');
-  heading.textContent = `${formatDate(state.selectedDate)}의 책`;
-  elements.dayBooks.append(heading);
+  elements.dayBooks.replaceChildren(); if (!state.selectedDate) return;
+  const books = state.books.filter((book) => book.entries.some((entry) => entry.date === state.selectedDate)); if (!books.length) return;
+  const heading = document.createElement('h3'); heading.textContent = `${formatDate(state.selectedDate)}의 책`; elements.dayBooks.append(heading);
   books.forEach((book) => {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'day-book';
-    button.textContent = book.title;
-    button.addEventListener('click', () => openDetail(book.id, 'calendar-view'));
-    elements.dayBooks.append(button);
+    const button = document.createElement('button'); button.type = 'button'; button.className = 'day-book';
+    if (book.coverUrl) { const image = document.createElement('img'); image.src = book.coverUrl; image.alt = ''; button.append(image); }
+    const text = document.createElement('span'); const entryCount = book.entries.filter((entry) => entry.date === state.selectedDate).length; text.textContent = `${book.title}${entryCount > 1 ? ` · ${entryCount}개 기록` : ''}`; button.append(text);
+    button.addEventListener('click', () => openDetail(book.id, 'calendar-view')); elements.dayBooks.append(button);
   });
 }
 
-function changeMonth(offset) {
-  const next = new Date(state.calendarDate.getFullYear(), state.calendarDate.getMonth() + offset, 1);
-  if (next < MIN_MONTH) return;
-  state.calendarDate = next;
-  state.selectedDate = '';
-  renderCalendar();
-}
-
-function showToast(message) {
-  clearTimeout(toastTimer);
-  elements.toast.textContent = message;
-  elements.toast.classList.add('show');
-  toastTimer = setTimeout(() => elements.toast.classList.remove('show'), 2200);
-}
+function changeMonth(offset) { const next = new Date(state.calendarDate.getFullYear(), state.calendarDate.getMonth() + offset, 1); if (next < MIN_MONTH) return; state.calendarDate = next; state.selectedDate = ''; renderCalendar(); }
+function showToast(message) { clearTimeout(toastTimer); elements.toast.textContent = message; elements.toast.classList.add('show'); toastTimer = setTimeout(() => elements.toast.classList.remove('show'), 2200); }
 
 async function dailyBackup() {
-  const today = localDateString();
-  if (localStorage.getItem('bookclip-last-backup') === today) return;
-  try {
-    const exportedArray = await getAllBooks();
-    const response = await fetch('https://appointee-unnoticed-donated.ngrok-free.dev/api/app-backup/bookclip', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(exportedArray)
-    });
-    if (response.ok) localStorage.setItem('bookclip-last-backup', today);
-  } catch (_) {
-    // Backup is best-effort because the receiving computer may be offline.
-  }
+  const today = localDateString(); if (localStorage.getItem('bookclip-last-backup') === today) return;
+  try { const response = await fetch('https://appointee-unnoticed-donated.ngrok-free.dev/api/app-backup/bookclip', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(await getAllBooks()) }); if (response.ok) localStorage.setItem('bookclip-last-backup', today); } catch (_) { /* best effort */ }
 }
 
 function bindEvents() {
-  elements.navButtons.forEach((button) => button.addEventListener('click', () => {
-    showView(button.dataset.view);
-    if (button.dataset.view === 'calendar-view') renderCalendar();
-  }));
-  elements.addBook.addEventListener('click', () => openEditor());
-  elements.editorBack.addEventListener('click', () => showView(state.editingId ? 'detail-view' : 'home-view'));
-  elements.detailBack.addEventListener('click', () => showView(state.returnView));
-  elements.editBook.addEventListener('click', () => {
-    const book = state.books.find((item) => item.id === state.activeBookId);
-    if (book) openEditor(book);
-  });
-  elements.form.addEventListener('submit', saveBook);
-  elements.reviewInput.addEventListener('input', autoGrowTextarea);
-  elements.clearDrawing.addEventListener('click', resetCanvas);
-  elements.canvas.addEventListener('pointerdown', startDrawing);
-  elements.canvas.addEventListener('pointermove', draw);
-  elements.canvas.addEventListener('pointerup', stopDrawing);
-  elements.canvas.addEventListener('pointercancel', stopDrawing);
-  elements.prevMonth.addEventListener('click', () => changeMonth(-1));
-  elements.nextMonth.addEventListener('click', () => changeMonth(1));
+  elements.navButtons.forEach((button) => button.addEventListener('click', () => { showView(button.dataset.view); if (button.dataset.view === 'calendar-view') renderCalendar(); }));
+  elements.addBook.addEventListener('click', openNewBookEditor); elements.addEntry.addEventListener('click', openNewEntryEditor);
+  elements.editorBack.addEventListener('click', () => state.editorMode === 'new-book' ? showView('home-view') : openDetail(state.activeBookId, state.returnView));
+  elements.inlineEditorClose.addEventListener('click', () => openDetail(state.activeBookId, state.returnView));
+  elements.detailBack.addEventListener('click', () => showView(state.returnView)); elements.form.addEventListener('submit', saveBook);
+  elements.reviewInput.addEventListener('input', autoGrowTextarea); elements.clearDrawing.addEventListener('click', resetCanvas);
+  elements.canvas.addEventListener('pointerdown', startDrawing); elements.canvas.addEventListener('pointermove', draw); elements.canvas.addEventListener('pointerup', stopDrawing); elements.canvas.addEventListener('pointercancel', stopDrawing);
+  elements.prevMonth.addEventListener('click', () => changeMonth(-1)); elements.nextMonth.addEventListener('click', () => changeMonth(1));
+  window.addEventListener('resize', () => { cancelAnimationFrame(resizeFrame); resizeFrame = requestAnimationFrame(renderShelf); });
 }
 
 async function init() {
-  bindEvents();
-  resetCanvas();
-  try {
-    if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
-    await refreshBooks();
-  } catch (error) {
-    console.error('저장된 독후감을 불러오지 못했습니다.', error);
-    showToast('저장 공간을 열지 못했어요.');
-  }
+  bindEvents(); resetCanvas();
+  try { if (navigator.storage?.persist) navigator.storage.persist().catch(() => {}); await migrateBooks(); await refreshBooks(); }
+  catch (error) { console.error('저장된 독서 기록을 불러오지 못했습니다.', error); showToast('저장 공간을 열지 못했어요.'); }
   if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(() => {}));
+    navigator.serviceWorker.register('./sw.js', { scope: './', updateViaCache: 'none' }).then(reg => reg.update()).catch(() => {});
+    let reloading = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => { if (reloading) return; reloading = true; location.reload(); });
   }
   setTimeout(dailyBackup, 4000);
 }
