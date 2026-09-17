@@ -24,7 +24,7 @@ const elements = {
   editorEyebrow: $('#editor-eyebrow'), editorCard: $('#editor-card'), editorView: $('#editor-view'),
   inlineEditorClose: $('#inline-editor-close'),
   saveBook: $('#save-book'), editorBack: $('#editor-back'),
-  detailBack: $('#detail-back'), detailTitle: $('#detail-title'), detailDate: $('#detail-date'),
+  detailBack: $('#detail-back'), deleteBook: $('#delete-book'), detailTitle: $('#detail-title'), detailDate: $('#detail-date'),
   detailSynopsis: $('#detail-synopsis'), detailCover: $('#detail-cover'), detailEntries: $('#detail-entries'),
   addEntry: $('#add-entry'), calendarTitle: $('#calendar-title'), calendarGrid: $('#calendar-grid'),
   prevMonth: $('#prev-month'), nextMonth: $('#next-month'), dayBooks: $('#day-books'), toast: $('#toast')
@@ -72,6 +72,15 @@ async function putBook(book) {
   return new Promise((resolve, reject) => {
     const request = db.transaction(STORE_NAME, 'readwrite').objectStore(STORE_NAME).put(book);
     request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function deleteBook(id) {
+  const db = await openDB();
+  return new Promise((resolve, reject) => {
+    const request = db.transaction(STORE_NAME, 'readwrite').objectStore(STORE_NAME).delete(id);
+    request.onsuccess = () => resolve();
     request.onerror = () => reject(request.error);
   });
 }
@@ -282,6 +291,19 @@ function renderEntries(book) {
   });
 }
 
+async function requestBookDelete(bookId, button) {
+  if (button.dataset.armed !== 'true') {
+    button.dataset.armed = 'true';
+    button.textContent = '한 번 더 눌러 책 삭제';
+    setTimeout(() => { if (button.isConnected) { button.dataset.armed = ''; button.textContent = '이 책 삭제'; } }, 3000);
+    return;
+  }
+  await deleteBook(bookId);
+  await refreshBooks();
+  showView(state.returnView);
+  showToast('책을 삭제했어요.');
+}
+
 async function requestEntryDelete(bookId, entryId, button) {
   if (button.dataset.armed !== 'true') {
     button.dataset.armed = 'true';
@@ -452,7 +474,9 @@ function bindEvents() {
   elements.addBook.addEventListener('click', openNewBookEditor); elements.addEntry.addEventListener('click', openNewEntryEditor);
   elements.editorBack.addEventListener('click', () => state.editorMode === 'new-book' ? showView('home-view') : openDetail(state.activeBookId, state.returnView));
   elements.inlineEditorClose.addEventListener('click', () => openDetail(state.activeBookId, state.returnView));
-  elements.detailBack.addEventListener('click', () => showView(state.returnView)); elements.form.addEventListener('submit', saveBook);
+  elements.detailBack.addEventListener('click', () => showView(state.returnView));
+  elements.deleteBook.addEventListener('click', () => requestBookDelete(state.activeBookId, elements.deleteBook));
+  elements.form.addEventListener('submit', saveBook);
   elements.reviewInput.addEventListener('input', autoGrowTextarea); elements.clearDrawing.addEventListener('click', resetCanvas);
   elements.canvas.addEventListener('pointerdown', startDrawing); elements.canvas.addEventListener('pointermove', draw); elements.canvas.addEventListener('pointerup', stopDrawing); elements.canvas.addEventListener('pointercancel', stopDrawing);
   elements.prevMonth.addEventListener('click', () => changeMonth(-1)); elements.nextMonth.addEventListener('click', () => changeMonth(1));
